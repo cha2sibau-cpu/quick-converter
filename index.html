@@ -142,6 +142,34 @@ h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
 }
 .dl-btn:hover { background: #333; }
 
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  border: none;
+  border-radius: 7px;
+  padding: .42rem .9rem;
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s;
+}
+.toolbar-btn.secondary { background: #f2f2ee; color: #1a1a1a; }
+.toolbar-btn.secondary:hover { background: #e6e6e2; }
+.toolbar-btn.primary { background: #1a1a1a; color: #fff; }
+.toolbar-btn.primary:hover { background: #333; }
+.toolbar-btn:disabled { opacity: .4; cursor: not-allowed; pointer-events: none; }
+
 @media (max-width: 480px) {
   .card { flex-direction: column; }
   .thumb, .thumb-placeholder { width: 100%; height: 110px; }
@@ -169,9 +197,23 @@ h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
   <input type="file" id="fileInput" multiple
          accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg">
 
+  <div id="toolbar" class="toolbar" hidden>
+    <button id="clearBtn" class="toolbar-btn secondary">✕ Clear all</button>
+    <button id="dlAllBtn" class="toolbar-btn primary" disabled>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Download all (ZIP)
+    </button>
+  </div>
+
   <div id="results"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 'use strict';
 
@@ -179,6 +221,36 @@ const SSIM_THRESHOLD = 0.999;
 const MAX_FILES = 10;
 const SUPPORTED_TYPES = new Set(['image/webp', 'image/png', 'image/jpeg']);
 const EXT_TO_MIME = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+
+// Registry of successfully converted files for "Download all"
+const completedFiles = [];
+
+function updateToolbar() {
+  const toolbar = document.getElementById('toolbar');
+  const hasCards = document.getElementById('results').children.length > 0;
+  toolbar.hidden = !hasCards;
+  document.getElementById('dlAllBtn').disabled = completedFiles.length === 0;
+}
+
+async function downloadAllAsZip() {
+  if (completedFiles.length === 0) return;
+  const btn = document.getElementById('dlAllBtn');
+  btn.textContent = 'Zipping…';
+  btn.disabled = true;
+  try {
+    const zip = new JSZip();
+    for (const { name, blob } of completedFiles) zip.file(name, blob);
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(zipBlob);
+    a.download = 'converted-images.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download all (ZIP)`;
+  }
+}
 
 // ── SSIM ──────────────────────────────────────────────────────────────────────
 // 8×8 non-overlapping block SSIM, averaged over 3 RGB channels.
@@ -312,6 +384,7 @@ function createPendingCard(file) {
       <div class="card-status">Loading…</div>
     </div>`;
   document.getElementById('results').appendChild(card);
+  updateToolbar();
   return card;
 }
 
@@ -354,6 +427,9 @@ function finaliseCard(card, file, result) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 15000);
   });
+
+  completedFiles.push({ name: stem(file.name) + '.jpg', blob: result.blob });
+  updateToolbar();
 }
 
 function errorCard(card, file, message) {
@@ -444,6 +520,16 @@ fileInput.addEventListener('change', () => {
   if (fileInput.files.length) handleFiles(fileInput.files);
   fileInput.value = '';
 });
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  document.getElementById('results').innerHTML = '';
+  completedFiles.length = 0;
+  const notice = document.getElementById('limitNotice');
+  if (notice) notice.remove();
+  updateToolbar();
+});
+
+document.getElementById('dlAllBtn').addEventListener('click', downloadAllAsZip);
 </script>
 </body>
 </html>
