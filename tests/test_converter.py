@@ -42,3 +42,49 @@ class TestToRgb:
         palette_img = rgb_img.convert('P')
         result = to_rgb(palette_img)
         assert result.mode == 'RGB'
+
+
+def _make_rgb_array(complexity: str = 'moderate') -> np.ndarray:
+    rng = np.random.default_rng(42)
+    if complexity == 'flat':
+        return np.full((64, 64, 3), 128, dtype=np.uint8)
+    elif complexity == 'moderate':
+        # 256x256 gentle gradient (1 value/pixel) — low-frequency content JPEG compresses cleanly
+        r = np.tile(np.arange(256, dtype=np.uint8), (256, 1))
+        g = np.tile(np.arange(256, dtype=np.uint8)[:, None], (1, 256))
+        b = np.full((256, 256), 128, dtype=np.uint8)
+        return np.stack([r, g, b], axis=-1)
+    elif complexity == 'noise':
+        return rng.integers(0, 256, (128, 128, 3), dtype=np.uint8)
+    raise ValueError(f"Unknown complexity: {complexity}")
+
+
+class TestFindOptimalQuality:
+    def test_returns_quality_in_valid_range(self):
+        arr = _make_rgb_array('moderate')
+        quality, _, _ = find_optimal_quality(arr)
+        assert 70 <= quality <= 95
+
+    def test_ssim_at_or_above_threshold_when_achievable(self):
+        # Flat image: SSIM >= 0.999 is achievable, so the result must honour the threshold
+        arr = _make_rgb_array('flat')
+        _, ssim_score, _ = find_optimal_quality(arr)
+        assert ssim_score >= 0.999
+
+    def test_returns_valid_jpeg_bytes(self):
+        arr = _make_rgb_array('moderate')
+        _, _, jpeg_bytes = find_optimal_quality(arr)
+        assert isinstance(jpeg_bytes, bytes)
+        assert jpeg_bytes[:2] == b'\xff\xd8'
+
+    def test_flat_image_uses_minimum_quality(self):
+        arr = _make_rgb_array('flat')
+        quality, ssim_score, _ = find_optimal_quality(arr)
+        assert quality == 70
+        assert ssim_score >= 0.999
+
+    def test_noise_image_still_returns_bytes(self):
+        arr = _make_rgb_array('noise')
+        quality, ssim_score, jpeg_bytes = find_optimal_quality(arr)
+        assert 70 <= quality <= 95
+        assert len(jpeg_bytes) > 0
