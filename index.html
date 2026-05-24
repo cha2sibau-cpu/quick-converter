@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Converter</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f5f5f0;
+  color: #1a1a1a;
+  min-height: 100vh;
+  padding: 2.5rem 1rem;
+}
+
+.container { max-width: 700px; margin: 0 auto; }
+
+header { margin-bottom: 2rem; }
+
+h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+
+.subtitle { color: #6b6b6b; margin-top: 0.3rem; font-size: 0.875rem; }
+
+/* Drop zone */
+.drop-zone {
+  background: #1a1a1a;
+  border: 2px dashed #3d3d3d;
+  border-radius: 14px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  color: #fff;
+  margin-bottom: 1.5rem;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: #777;
+  background: #242424;
+}
+.drop-zone svg { width: 36px; height: 36px; opacity: .45; margin-bottom: .75rem; }
+.drop-zone p { font-size: .975rem; opacity: .85; }
+.drop-zone small { display: block; margin-top: .35rem; opacity: .4; font-size: .78rem; }
+
+#fileInput { display: none; }
+
+/* Limit notice */
+.notice {
+  background: #fef9c3;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: 8px;
+  padding: .7rem 1rem;
+  font-size: .85rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* Results */
+.results { display: flex; flex-direction: column; gap: .875rem; }
+
+/* Card */
+.card {
+  background: #fff;
+  border: 1px solid #e8e8e0;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.thumb {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #efefeb;
+  flex-shrink: 0;
+}
+.thumb-placeholder {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  background: #efefeb;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  font-size: .7rem;
+}
+
+.card-body { flex: 1; min-width: 0; }
+
+.card-title {
+  font-size: .875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: .35rem;
+}
+.card-title .arrow { color: #9a9a9a; font-weight: 400; }
+
+.card-status { font-size: .8rem; color: #7a7a7a; margin-bottom: .5rem; }
+.card.is-error .card-status { color: #dc2626; }
+
+.stats { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .65rem; }
+
+.tag {
+  background: #f2f2ee;
+  border-radius: 5px;
+  padding: .2rem .5rem;
+  font-size: .77rem;
+  font-variant-numeric: tabular-nums;
+  color: #1a1a1a;
+}
+.tag .label { color: #888; }
+.tag.green { background: #dcfce7; color: #166534; }
+.tag.red   { background: #fee2e2; color: #991b1b; }
+.tag.warn  { background: #fef9c3; color: #92400e; }
+
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  background: #1a1a1a;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: .42rem .85rem;
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .15s;
+}
+.dl-btn:hover { background: #333; }
+
+@media (max-width: 480px) {
+  .card { flex-direction: column; }
+  .thumb, .thumb-placeholder { width: 100%; height: 110px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Quick Converter</h1>
+    <p class="subtitle">WebP · PNG · JPEG → JPEG &nbsp;·&nbsp; SSIM-guided quality (95→70) &nbsp;·&nbsp; runs in your browser</p>
+  </header>
+
+  <div class="drop-zone" id="dropZone">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <p>Drop images here, or click to select</p>
+    <small>WebP · PNG · JPEG &nbsp;·&nbsp; up to 10 at a time · TIFF not supported in browsers</small>
+  </div>
+
+  <input type="file" id="fileInput" multiple
+         accept=".webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg">
+
+  <div id="results"></div>
+</div>
+
+<script>
+'use strict';
+
+const SSIM_THRESHOLD = 0.999;
+const MAX_FILES = 10;
+const SUPPORTED_TYPES = new Set(['image/webp', 'image/png', 'image/jpeg']);
+const EXT_TO_MIME = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+
+// ── SSIM ──────────────────────────────────────────────────────────────────────
+// 8×8 non-overlapping block SSIM, averaged over 3 RGB channels.
+// Same C1/C2 constants as scikit-image; windowing differs (block vs. Gaussian).
+function computeSSIM(d1, d2, w, h) {
+  const C1 = (0.01 * 255) ** 2;  // 6.5025
+  const C2 = (0.03 * 255) ** 2;  // 58.5225
+  const BS = 8;
+  let total = 0, count = 0;
+
+  for (let by = 0; by <= h - BS; by += BS) {
+    for (let bx = 0; bx <= w - BS; bx += BS) {
+      for (let ch = 0; ch < 3; ch++) {
+        let sx = 0, sy = 0, sx2 = 0, sy2 = 0, sxy = 0;
+        for (let py = 0; py < BS; py++) {
+          for (let px = 0; px < BS; px++) {
+            const i = ((by + py) * w + (bx + px)) * 4 + ch;
+            const x = d1[i], y = d2[i];
+            sx += x; sy += y; sx2 += x * x; sy2 += y * y; sxy += x * y;
+          }
+        }
+        const n = BS * BS, mx = sx / n, my = sy / n;
+        const vx = sx2 / n - mx * mx;
+        const vy = sy2 / n - my * my;
+        const cv = sxy / n - mx * my;
+        total += ((2 * mx * my + C1) * (2 * cv + C2)) /
+                 ((mx * mx + my * my + C1) * (vx + vy + C2));
+        count++;
+      }
+    }
+  }
+  return count > 0 ? total / count : 1.0;
+}
+
+// ── Canvas helpers ────────────────────────────────────────────────────────────
+function imageToRgbCanvas(img) {
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(img, 0, 0);
+  return c;
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise(resolve => canvas.toBlob(resolve, type, quality));
+}
+
+async function blobToImageData(blob, w, h) {
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+  URL.revokeObjectURL(url);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0);
+  return c.getContext('2d').getImageData(0, 0, w, h).data;
+}
+
+// ── Quality search (mirrors Python find_optimal_quality) ──────────────────────
+async function findOptimalQuality(canvas, onProgress) {
+  const w = canvas.width, h = canvas.height;
+  const origData = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let best = null, lastSSIM = null, lastBlob = null;
+
+  for (let q = 95; q >= 70; q--) {
+    onProgress(q);
+    const blob = await canvasToBlob(canvas, 'image/jpeg', q / 100);
+    const compData = await blobToImageData(blob, w, h);
+    const ssim = computeSSIM(origData, compData, w, h);
+    lastSSIM = ssim;
+    lastBlob = blob;
+    if (ssim >= SSIM_THRESHOLD) {
+      best = { quality: q, ssim, blob };
+    } else {
+      break;
+    }
+  }
+
+  return best ?? { quality: 95, ssim: lastSSIM, blob: lastBlob, warning: true };
+}
+
+// ── File loading ──────────────────────────────────────────────────────────────
+function loadFileAsImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not decode image.'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Could not read file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+function stem(filename) {
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
+// ── Cards ─────────────────────────────────────────────────────────────────────
+function createPendingCard(file) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="thumb-placeholder">…</div>
+    <div class="card-body">
+      <div class="card-title">
+        ${esc(file.name)}
+        <span class="arrow"> → </span>${esc(stem(file.name))}.jpg
+      </div>
+      <div class="card-status">Loading…</div>
+    </div>`;
+  document.getElementById('results').appendChild(card);
+  return card;
+}
+
+function finaliseCard(card, file, result) {
+  const pct = (result.blob.size / file.size - 1) * 100;
+  const pctStr = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+  const pctClass = pct < 0 ? 'green' : 'red';
+
+  const thumbUrl = URL.createObjectURL(result.blob);
+
+  card.innerHTML = `
+    <img class="thumb" src="${thumbUrl}" alt="preview">
+    <div class="card-body">
+      <div class="card-title">
+        ${esc(file.name)}
+        <span class="arrow"> → </span>${esc(stem(file.name))}.jpg
+      </div>
+      <div class="stats">
+        <div class="tag"><span class="label">Quality </span>${result.quality}</div>
+        <div class="tag"><span class="label">SSIM </span>${result.ssim.toFixed(6)}</div>
+        <div class="tag"><span class="label">Size </span>${formatBytes(file.size)} → ${formatBytes(result.blob.size)}</div>
+        <div class="tag ${pctClass}">${pctStr}</div>
+        ${result.warning ? '<div class="tag warn">⚠ SSIM &lt; 0.999 at q95</div>' : ''}
+      </div>
+      <button class="dl-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download
+      </button>
+    </div>`;
+
+  card.querySelector('.dl-btn').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(result.blob);
+    a.download = stem(file.name) + '.jpg';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+  });
+}
+
+function errorCard(card, file, message) {
+  card.classList.add('is-error');
+  card.innerHTML = `
+    <div class="thumb-placeholder">✕</div>
+    <div class="card-body">
+      <div class="card-title">${esc(file.name)}</div>
+      <div class="card-status">${esc(message)}</div>
+    </div>`;
+}
+
+// ── Process one file ──────────────────────────────────────────────────────────
+function guessMime(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  return EXT_TO_MIME[ext] || '';
+}
+
+async function processFile(file) {
+  const card = createPendingCard(file);
+  const status = card.querySelector('.card-status');
+
+  try {
+    const mime = file.type || guessMime(file.name);
+    if (!SUPPORTED_TYPES.has(mime)) {
+      throw new Error(`Unsupported format "${file.type || file.name.split('.').pop()}". Use WebP, PNG, or JPEG.`);
+    }
+
+    status.textContent = 'Loading image…';
+    const img = await loadFileAsImage(file);
+
+    status.textContent = 'Compositing onto white background…';
+    const canvas = imageToRgbCanvas(img);
+
+    const result = await findOptimalQuality(canvas, q => {
+      status.textContent = `Testing quality ${q}…`;
+    });
+
+    finaliseCard(card, file, result);
+
+  } catch (err) {
+    errorCard(card, file, err.message);
+  }
+}
+
+// ── Batch handler ─────────────────────────────────────────────────────────────
+function showLimitNotice() {
+  const old = document.getElementById('limitNotice');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.id = 'limitNotice';
+  el.className = 'notice';
+  el.innerHTML = `<span>⚠</span> Only the first <strong>${MAX_FILES}</strong> images are processed at a time.`;
+  document.getElementById('results').before(el);
+  setTimeout(() => el.remove(), 7000);
+}
+
+function handleFiles(fileList) {
+  const files = Array.from(fileList);
+  if (files.length > MAX_FILES) showLimitNotice();
+  files.slice(0, MAX_FILES).forEach(processFile);
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', e => {
+  if (!dropZone.contains(e.relatedTarget)) {
+    dropZone.classList.remove('drag-over');
+  }
+});
+
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFiles(fileInput.files);
+  fileInput.value = '';
+});
+</script>
+</body>
+</html>
