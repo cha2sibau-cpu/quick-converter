@@ -88,3 +88,47 @@ class TestFindOptimalQuality:
         quality, ssim_score, jpeg_bytes = find_optimal_quality(arr)
         assert 70 <= quality <= 95
         assert len(jpeg_bytes) > 0
+
+
+from pathlib import Path
+from converter import convert_file
+
+
+class TestConvertFile:
+    def _write_png(self, path: Path, mode: str = 'RGB') -> None:
+        arr = _make_rgb_array('flat')
+        img = Image.fromarray(arr)
+        if mode == 'RGBA':
+            img = img.convert('RGBA')
+        img.save(path)
+
+    def test_png_produces_jpg_output(self, tmp_path):
+        src = tmp_path / 'test.png'
+        self._write_png(src)
+        convert_file(src)
+        assert (tmp_path / 'test.jpg').exists()
+
+    def test_output_is_valid_jpeg(self, tmp_path):
+        src = tmp_path / 'test.png'
+        self._write_png(src)
+        convert_file(src)
+        with Image.open(tmp_path / 'test.jpg') as img:
+            assert img.format == 'JPEG'
+
+    def test_rgba_converts_without_error(self, tmp_path):
+        src = tmp_path / 'test.png'
+        self._write_png(src, mode='RGBA')
+        convert_file(src)
+        assert (tmp_path / 'test.jpg').exists()
+
+    def test_jpeg_extension_normalised_to_jpg(self, tmp_path):
+        src = tmp_path / 'test.jpeg'
+        self._write_png(src)
+        convert_file(src)
+        assert (tmp_path / 'test.jpg').exists()
+
+    def test_output_size_is_positive(self, tmp_path):
+        src = tmp_path / 'test.png'
+        self._write_png(src)
+        convert_file(src)
+        assert (tmp_path / 'test.jpg').stat().st_size > 0

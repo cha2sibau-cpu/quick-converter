@@ -60,11 +60,42 @@ def find_optimal_quality(rgb_array: np.ndarray) -> tuple[int, float, bytes]:
 
 
 def convert_file(input_path: Path) -> None:
-    raise NotImplementedError
+    output_path = input_path.with_suffix('.jpg')
+    original_size = input_path.stat().st_size
+
+    with Image.open(input_path) as img:
+        rgb_img = to_rgb(img)
+        rgb_array = np.array(rgb_img)
+    quality, ssim_score, jpeg_bytes = find_optimal_quality(rgb_array)
+
+    output_path.write_bytes(jpeg_bytes)
+    output_size = len(jpeg_bytes)
+    pct_change = (output_size / original_size - 1) * 100
+
+    print(f"{input_path.name} → {output_path.name}")
+    print(f"  Quality: {quality}  |  SSIM: {ssim_score:.6f}  |  "
+          f"{original_size:,} B → {output_size:,} B  ({pct_change:+.1f}%)")
 
 
 def main() -> None:
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(
+        description='Convert images to JPEG at the lowest quality where SSIM >= 0.999.'
+    )
+    parser.add_argument('files', nargs='+', type=Path, metavar='FILE',
+                        help='Input image files (webp, png, jpeg, tiff)')
+    args = parser.parse_args()
+
+    for path in args.files:
+        if not path.exists():
+            print(f"Error: {path} not found", file=sys.stderr)
+            continue
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            print(f"Skipping {path.name}: unsupported format ({path.suffix})", file=sys.stderr)
+            continue
+        try:
+            convert_file(path)
+        except Exception as exc:
+            print(f"Error converting {path.name}: {exc}", file=sys.stderr)
 
 
 if __name__ == '__main__':
