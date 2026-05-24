@@ -15,7 +15,12 @@ SSIM_THRESHOLD = 0.999
 
 
 def to_rgb(image: Image.Image) -> Image.Image:
-    raise NotImplementedError
+    if image.mode == 'RGB':
+        return image
+    background = Image.new('RGB', image.size, (255, 255, 255))
+    rgba = image.convert('RGBA')
+    background.paste(rgba, mask=rgba.split()[3])
+    return background
 
 
 def find_optimal_quality(rgb_array: np.ndarray) -> tuple[int, float, bytes]:
