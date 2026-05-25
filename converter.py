@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 import argparse
-import io
 import sys
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
-from skimage.metrics import structural_similarity
 
 SUPPORTED_EXTENSIONS = {'.webp', '.png', '.jpg', '.jpeg', '.tiff', '.tif'}
-MIN_QUALITY = 70
-MAX_QUALITY = 95
-SSIM_THRESHOLD = 0.999
+JPEG_QUALITY = 95
 
 
 def to_rgb(image: Image.Image) -> Image.Image:
@@ -23,63 +18,25 @@ def to_rgb(image: Image.Image) -> Image.Image:
     return background
 
 
-def find_optimal_quality(rgb_array: np.ndarray) -> tuple[int, float, bytes]:
-    """Return (quality, ssim_score, jpeg_bytes) at lowest quality with SSIM >= SSIM_THRESHOLD."""
-    best_quality = None
-    best_ssim = None
-    best_bytes = None
-    last_score = None
-    last_bytes = None
-
-    for quality in range(MAX_QUALITY, MIN_QUALITY - 1, -1):
-        buf = io.BytesIO()
-        Image.fromarray(rgb_array).save(buf, format='JPEG', quality=quality)
-        jpeg_bytes = buf.getvalue()
-
-        buf.seek(0)
-        compressed = np.array(Image.open(buf).convert('RGB'))
-        score = structural_similarity(rgb_array, compressed, channel_axis=-1, data_range=255)
-
-        last_score = score
-        last_bytes = jpeg_bytes
-
-        if score >= SSIM_THRESHOLD:
-            best_quality = quality
-            best_ssim = score
-            best_bytes = jpeg_bytes
-        else:
-            break
-
-    if best_bytes is not None:
-        return best_quality, best_ssim, best_bytes
-
-    # Fallback: even quality 95 fell below threshold — use it with a warning
-    print(f"  Warning: SSIM {last_score:.6f} < {SSIM_THRESHOLD} even at quality {MAX_QUALITY}",
-          file=sys.stderr)
-    return MAX_QUALITY, last_score, last_bytes
-
-
 def convert_file(input_path: Path) -> None:
     output_path = input_path.with_suffix('.jpg')
     original_size = input_path.stat().st_size
 
     with Image.open(input_path) as img:
         rgb_img = to_rgb(img)
-        rgb_array = np.array(rgb_img)
-    quality, ssim_score, jpeg_bytes = find_optimal_quality(rgb_array)
+        rgb_img.save(output_path, format='JPEG', quality=JPEG_QUALITY)
 
-    output_path.write_bytes(jpeg_bytes)
-    output_size = len(jpeg_bytes)
+    output_size = output_path.stat().st_size
     pct_change = (output_size / original_size - 1) * 100
 
     print(f"{input_path.name} → {output_path.name}")
-    print(f"  Quality: {quality}  |  SSIM: {ssim_score:.6f}  |  "
+    print(f"  Quality: {JPEG_QUALITY}  |  "
           f"{original_size:,} B → {output_size:,} B  ({pct_change:+.1f}%)")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description='Convert images to JPEG at the lowest quality where SSIM >= 0.999.'
+        description='Convert images to JPEG at quality 95.'
     )
     parser.add_argument('files', nargs='+', type=Path, metavar='FILE',
                         help='Input image files (webp, png, jpeg, tiff)')

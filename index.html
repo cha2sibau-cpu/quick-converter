@@ -224,7 +224,7 @@ h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
 <script>
 'use strict';
 
-const SSIM_THRESHOLD = 0.999;
+const JPEG_QUALITY = 0.95;
 const MAX_FILES = 10;
 const SUPPORTED_TYPES = new Set(['image/webp', 'image/png', 'image/jpeg']);
 const EXT_TO_MIME = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
@@ -259,39 +259,6 @@ async function downloadAllAsZip() {
   }
 }
 
-// ── SSIM ──────────────────────────────────────────────────────────────────────
-// 8×8 non-overlapping block SSIM, averaged over 3 RGB channels.
-// Same C1/C2 constants as scikit-image; windowing differs (block vs. Gaussian).
-function computeSSIM(d1, d2, w, h) {
-  const C1 = (0.01 * 255) ** 2;  // 6.5025
-  const C2 = (0.03 * 255) ** 2;  // 58.5225
-  const BS = 8;
-  let total = 0, count = 0;
-
-  for (let by = 0; by <= h - BS; by += BS) {
-    for (let bx = 0; bx <= w - BS; bx += BS) {
-      for (let ch = 0; ch < 3; ch++) {
-        let sx = 0, sy = 0, sx2 = 0, sy2 = 0, sxy = 0;
-        for (let py = 0; py < BS; py++) {
-          for (let px = 0; px < BS; px++) {
-            const i = ((by + py) * w + (bx + px)) * 4 + ch;
-            const x = d1[i], y = d2[i];
-            sx += x; sy += y; sx2 += x * x; sy2 += y * y; sxy += x * y;
-          }
-        }
-        const n = BS * BS, mx = sx / n, my = sy / n;
-        const vx = sx2 / n - mx * mx;
-        const vy = sy2 / n - my * my;
-        const cv = sxy / n - mx * my;
-        total += ((2 * mx * my + C1) * (2 * cv + C2)) /
-                 ((mx * mx + my * my + C1) * (vx + vy + C2));
-        count++;
-      }
-    }
-  }
-  return count > 0 ? total / count : 1.0;
-}
-
 // ── Canvas helpers ────────────────────────────────────────────────────────────
 function imageToRgbCanvas(img) {
   const c = document.createElement('canvas');
@@ -308,38 +275,9 @@ function canvasToBlob(canvas, type, quality) {
   return new Promise(resolve => canvas.toBlob(resolve, type, quality));
 }
 
-async function blobToImageData(blob, w, h) {
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-  URL.revokeObjectURL(url);
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  c.getContext('2d').drawImage(img, 0, 0);
-  return c.getContext('2d').getImageData(0, 0, w, h).data;
-}
-
-// ── Quality search (mirrors Python find_optimal_quality) ──────────────────────
-async function findOptimalQuality(canvas, onProgress) {
-  const w = canvas.width, h = canvas.height;
-  const origData = canvas.getContext('2d').getImageData(0, 0, w, h).data;
-  let best = null, lastSSIM = null, lastBlob = null;
-
-  for (let q = 95; q >= 70; q--) {
-    onProgress(q);
-    const blob = await canvasToBlob(canvas, 'image/jpeg', q / 100);
-    const compData = await blobToImageData(blob, w, h);
-    const ssim = computeSSIM(origData, compData, w, h);
-    lastSSIM = ssim;
-    lastBlob = blob;
-    if (ssim >= SSIM_THRESHOLD) {
-      best = { quality: q, ssim, blob };
-    } else {
-      break;
-    }
-  }
-
-  return best ?? { quality: 95, ssim: lastSSIM, blob: lastBlob, warning: true };
+async function convertToJpeg(canvas) {
+  const blob = await canvasToBlob(canvas, 'image/jpeg', JPEG_QUALITY);
+  return { quality: Math.round(JPEG_QUALITY * 100), blob };
 }
 
 // ── File loading ──────────────────────────────────────────────────────────────
@@ -411,10 +349,8 @@ function finaliseCard(card, file, result) {
       </div>
       <div class="stats">
         <div class="tag"><span class="label">Quality </span>${result.quality}</div>
-        <div class="tag"><span class="label">SSIM </span>${result.ssim.toFixed(6)}</div>
         <div class="tag"><span class="label">Size </span>${formatBytes(file.size)} → ${formatBytes(result.blob.size)}</div>
         <div class="tag ${pctClass}">${pctStr}</div>
-        ${result.warning ? '<div class="tag warn">⚠ SSIM &lt; 0.999 at q95</div>' : ''}
       </div>
       <button class="dl-btn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -468,12 +404,10 @@ async function processFile(file) {
     status.textContent = 'Loading image…';
     const img = await loadFileAsImage(file);
 
-    status.textContent = 'Compositing onto white background…';
+    status.textContent = 'Converting…';
     const canvas = imageToRgbCanvas(img);
 
-    const result = await findOptimalQuality(canvas, q => {
-      status.textContent = `Testing quality ${q}…`;
-    });
+    const result = await convertToJpeg(canvas);
 
     finaliseCard(card, file, result);
 
